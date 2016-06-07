@@ -11,12 +11,15 @@ from unicorn.x86_const import *
 upck32 = lambda x: struct.unpack('I', x)[0]
 pck32 = lambda x: struct.pack('I', x)
 
+
+CK = 0
 FS_0 = 0x1000
 PEB_ADD = 0x3000
 TEB_ADD = 0x6000
 LDR_ADD1 = 0x9000
 LDR_ADD2 = 0xB000
 LDR_ADD3 = 0xE000
+LDR_ADD4 = 0xF000
 PEB_LDR_ADD = 0x13000
 STACK_BASE = 0x30000
 STACK_LIMIT = 0x1000
@@ -31,6 +34,8 @@ strUmonBase = strKerBase + 200
 strUmon = "urlmon.dll"
 strAdvBase = strUmonBase + 200
 strAdvp = "advapi32.dll"
+strUser32Base = strAdvBase + 200
+strUser32 = 'user32.dll'
 pe_struct = {
     'imageBase': 0x0,
     'codeBase': 0x0,
@@ -58,6 +63,11 @@ advapi32_struct = {
     'sizeOfImage': 0x0,
     'entryPoint': 0x0,
 }
+User32_struct = {
+    'imageBase': 0x0,
+    'sizeOfImage': 0x0,
+    'entryPoint': 0x0,
+}
 
 imp_dll = {}
 
@@ -75,6 +85,80 @@ def string_pack(argv):
             break
         s += chr(c)
     return s
+
+
+def hook_IsDebuggerPresent(id, esp, uc):
+    eip_saved = pops(uc, esp)
+    print('0x%0.2x:\tCall IsDebuggerPresent')
+    uc.reg_write(UC_X86_REG_EAX, 0)
+    uc.mem_write(esp, pck32(eip_saved))
+
+
+def hook_Sleep(id, esp, uc):
+    eip_saved = pops(uc, esp)
+    dwMilliseconds = pops(uc, esp + 4)
+    print("0x%0.2x:\tCall Sleep (%x)" % (eip_saved, dwMilliseconds))
+
+    uc.mem_write(esp + 4, pck32(eip_saved))
+
+
+def hook_CloseHandle(id, esp, uc):
+    eip_saved = pops(uc, esp)
+    handle = pops(uc, esp + 4)
+    print("0x%0.2x:\tCall CloseHandle (0x%x)" %(eip_saved,handle))
+    global CK
+    if (CK == 1):
+        uc.emu_stop()
+    CK += 1
+    uc.mem_write(esp + 4, pck32(eip_saved))
+
+
+def hook_SetFilePointer(id, esp, uc):
+    eip_saved = pops(uc, esp)
+    hFile = pops(uc, esp + 4)
+    plDistanceToMove = pops(uc, esp + 8)
+    plpDistanceToMoveHigh = pops(uc, esp + 0xc)
+    dwMoveMethod = pops(uc, esp + 0x10)
+    print(
+        "0x%0.2x:\tCall SetFilePointer (hFile = 0x%x, lDistanceToMove = 0x%x, lpDistanceToMoveHigh = 0x%x, dwMoveMethod = 0x%x)" % (eip_saved,
+        hFile, plDistanceToMove, plpDistanceToMoveHigh, dwMoveMethod))
+    uc.mem_write(esp + 0x10, pck32(eip_saved))
+
+
+def hook_GetAsyncKeyState(id, esp, uc):
+    eip_saved = pops(uc, esp)
+    vKey = pops(uc, esp + 4)
+    print("0x%0.2x:\tCall GetAsyncKeyState (vKey = 0x%x)" % (eip_saved, vKey))
+    uc.reg_write(UC_X86_REG_EAX, 0x1)
+    uc.mem_write(esp + 4, pck32(eip_saved))
+
+
+def hook_GetKeyNameTextA(id, esp, uc):
+    eip_saved = pops(uc, esp)
+    lParam = pops(uc, esp +4)
+    lpString = pops(uc, esp + 8)
+    cchSize = pops(uc, esp + 0xc)
+    print("0x%0.2x:\tCall GetKeyNameTextA (lParam = 0x%x, lpString = 0x%x, cchSize = 0x%x)" %(eip_saved, lParam, lpString, cchSize))
+    uc.reg_write(UC_X86_REG_EAX, 0x1)
+    uc.mem_write(esp + 0xc, pck32(eip_saved))
+
+
+def hook_MapVirtualKeyA(id, esp, uc):
+    eip_saved = pops(uc, esp)
+    uCode = pops(uc, esp + 4)
+    uMapType = pops(uc, esp + 8)
+    print("0x%0.2x:\tCall MapVirtualKeyA (uCode = 0x%x, uMapType = 0x%x)" %(eip_saved,uCode, uMapType))
+    uc.reg_write(UC_X86_REG_EAX, 0x0)
+    uc.mem_write(esp +8, pck32(eip_saved))
+
+
+def hook_lstrlenA(id, esp, uc):
+    eip_saved = pops(uc, esp)
+    plpString = pops(uc, esp + 4)
+    lpString = uc.mem_read(plpString, 0x100)
+    print("0x%0.2x:\tCall lstrlenA (lpString = %s)" %(eip_saved, string_pack(lpString)))
+    uc.reg_write(UC_X86_REG_EAX, len(string_pack(lpString)))
+    uc.reg_write(esp + 4, eip_saved)
 
 
 def hook_GetTempPathA(id, esp, uc):
@@ -142,9 +226,7 @@ def hook_WriteFile(id, esp, uc):
     lpBuff = pops(uc, esp + 8)
     nNumberOfBytesWrite = pops(uc, esp + 0x0c)
     lpNumberOfBytesWritten = pops(uc, esp + 0x10)
-    print('0x%0.2x:\tCall WriteFile (hFile=0x%0.2x, lpBuff=0x%0.2x, nNumberOfBytesWrite=0x%0.2x)' % (eip_saved,
-                                                                                                     hFile, lpBuff,
-                                                                                                     nNumberOfBytesWrite))
+    print('0x%0.2x:\tCall WriteFile (hFile=0x%0.2x, lpBuff=0x%0.2x, nNumberOfBytesWrite=0x%0.2x)' % (eip_saved,hFile,lpBuff,nNumberOfBytesWrite))
     uc.reg_write(UC_X86_REG_ESP, esp + 0x14)
     uc.mem_write(esp + 0x14, pck32(eip_saved))
     uc.mem_write(lpNumberOfBytesWritten, struct.pack('<I', nNumberOfBytesWrite))
@@ -243,7 +325,7 @@ def hook_RegSetValueExA(eip, esp, uc):
     ValueName = uc.mem_read(lpValueName, 0x100)
     Data = uc.mem_read(lpData, 0x100)
     print("0x%x:\tCall RegSetValueExA (ValueName: %s, Registry data: %s)\n" % (
-    eip_saved, string_pack(ValueName), string_pack(Data)))
+        eip_saved, string_pack(ValueName), string_pack(Data)))
     uc.reg_write(UC_X86_REG_ESP, esp + 0x18)
     uc.mem_write(esp + 0x18, pck32(eip_saved))
 
@@ -381,6 +463,9 @@ def dll_loader(dllName, dll_base):
     elif dllName == "advapi32.dll":
         advapi32_struct['sizeOfImage'] = dll.OPTIONAL_HEADER.SizeOfImage
         advapi32_struct['entryPoint'] = dll.OPTIONAL_HEADER.AddressOfEntryPoint
+    elif dllName == "User32.dll":
+        User32_struct['sizeOfImage'] = dll.OPTIONAL_HEADER.SizeOfImage
+        User32_struct['entryPoint'] = dll.OPTIONAL_HEADER.AddressOfEntryPoint
     for entry in dll.DIRECTORY_ENTRY_EXPORT.symbols:
         data[entry.address] = '\xc3'
         imp_dll[dll_base + entry.address] = entry.name
@@ -394,7 +479,7 @@ def hook_code(uc, address, size, userdata):
     esp = uc.reg_read(UC_X86_REG_ESP)
     eip = uc.reg_read(UC_X86_REG_EIP)
     edx = uc.reg_read(UC_X86_REG_EDX)
-    # for a in asm:
+    #for a in asm:
     #    print('0x%x: \t%s\t%s\n edx = 0x%x' % (a.address, a.mnemonic, a.op_str, edx))
     if ((eip in imp_dll)):
         globals()['hook_' + imp_dll[eip]](eip, esp, uc)
@@ -415,6 +500,10 @@ def simulator_initialisation(mu):
         urlmon_base = kernel32_base + len(kernel32)
         urlmon = dll_loader("urlmon.dll", urlmon_base)
         mu.mem_write(urlmon_base, urlmon)
+
+        user32_base = urlmon_base + len(urlmon)
+        user32 = dll_loader("user32.dll", user32_base)
+        mu.mem_write(user32_base, user32)
         # Init PEB, TEB, LDR
         # init LDR_MODULE2
         ldr1 = x86_OS().init_ldr(LDR_ADD2, LDR_ADD3, LDR_ADD2 + 0x8, LDR_ADD3 + 0x8, LDR_ADD2 + 0x10, LDR_ADD3 + 0x10,
@@ -427,10 +516,15 @@ def simulator_initialisation(mu):
         mu.mem_write(strUmonBase, strUmon)
         mu.mem_write(LDR_ADD2, ldr2)
         # init LDR_MODULE3
-        ldr3 = x86_OS().init_ldr(LDR_ADD1, LDR_ADD2, LDR_ADD3 + 0x8, LDR_ADD1 + 0x8, LDR_ADD3 + 0x10, LDR_ADD1 + 0x10,
+        ldr3 = x86_OS().init_ldr(LDR_ADD4, LDR_ADD2, LDR_ADD4 + 0x8, LDR_ADD2 + 0x8, LDR_ADD4 + 0x10, LDR_ADD2 + 0x10,
                                  kernel32_base, kernel32_struct['entryPoint'], "kernel32.dll", strKerBase)
         mu.mem_write(strKerBase, strKernl)
         mu.mem_write(LDR_ADD3, ldr3)
+        # innit LDR4
+        ldr4 = x86_OS().init_ldr(LDR_ADD1, LDR_ADD3, LDR_ADD1 + 0x8, LDR_ADD3 + 0x8, LDR_ADD1 + 0x10, LDR_ADD3 + 0x10,
+                                 user32_base, User32_struct['entryPoint'], "user32.dll", strKerBase)
+        mu.mem_write(strKerBase, strKernl)
+        mu.mem_write(LDR_ADD4, ldr4)
         # init PEB_LDR_MODULE
         mu.mem_write(PEB_LDR_ADD, x86_OS().init_peb_ldr_data())
         # init PEB
@@ -445,8 +539,8 @@ def simulator_initialisation(mu):
 
 
 def main(argv):
-    check = 1
-    inputfile = 'samples/URLDonwloadToFile.sc'
+    check = 0
+    inputfile = 'samples/keylogger.exe'
     try:
         opts, args = getopt.getopt(argv, "s:p:", ["option=", "input="])
     except getopt.GetoptError:
@@ -480,7 +574,7 @@ def main(argv):
             pe = input_pe(inputfile)
             mu.mem_write(ADDRESS, pe)
             mu.reg_write(UC_X86_REG_EIP, ADDRESS + pe_struct['entryPoint'])
-            mu.hook_add(UC_HOOK_CODE, hook_code, None, DLL_BASE, DLL_BASE + 6 * PageSize)
+            mu.hook_add(UC_HOOK_CODE, hook_code)#, None, DLL_BASE, DLL_BASE + 6 * PageSize)
             mu.emu_start(ADDRESS + pe_struct['entryPoint'],
                          ADDRESS + pe_struct['entryPoint'] + pe_struct['textSectionSize'])
             print("Emulation done...")
