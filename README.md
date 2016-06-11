@@ -6,8 +6,8 @@ Analysis PE file or Shellcode (Only Windows x86)
 
 * Examples: Analysic Downloader.exe: python UniAna.py -p samples/Downloader.exe
 * Show report:
-  ![report](http://imgur.com/sZ5ZhaY)
+  ![report](http://i.imgur.com/sZ5ZhaYl.jpg)
 * Analysic UrlDownloadToFile.sc: python UniAna.py -p samples/UrlDownloadToFile.sc
 * Show report:
-  ![report] (http://imgur.com/G27xEZD)
+  ![report] (http://i.imgur.com/sZ5ZhaY.jpg)
 # Under development.
