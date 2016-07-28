@@ -107,9 +107,9 @@ def hook_CloseHandle(id, esp, uc):
     handle = pops(uc, esp + 4)
     print("0x%0.2x:\tCall CloseHandle (0x%x)" %(eip_saved,handle))
     global CK
-    if (CK == 1):
+    '''if (CK == 1):
         uc.emu_stop()
-    CK += 1
+    CK += 1'''
     uc.mem_write(esp + 4, pck32(eip_saved))
 
 
@@ -303,13 +303,16 @@ def hook_RegCreateKeyA(eip, esp, uc):
     SubKey = uc.mem_read(lpSubKey, 0x100)
     subkey = string_pack(SubKey)
     print("0x%x:\tCall RegCreateKeyA function With key: %s\%s\n" % (eip_saved, hkey[hKey], subkey))
+    uc.mem_write(phkResult, pck32(0x69))
+    uc.reg_write(UC_X86_REG_EAX, 0)
     uc.reg_write(UC_X86_REG_ESP, esp + 0xc)
     uc.mem_write(esp + 0xc, pck32(eip_saved))
 
 
 def hook_RegCloseKey(eip, esp, uc):
     eip_saved = pops(uc, esp)
-    print("0x%x:\tCall RegCloseKey function" % (eip_saved))
+    hKey = pops(uc, esp +4)
+    print("0x%x:\tCall RegCloseKey function (hKey= 0x%x)" % (eip_saved, hKey))
     uc.reg_write(UC_X86_REG_ESP, esp + 0x4)
     uc.mem_write(esp + 0x4, pck32(eip_saved))
 
@@ -324,8 +327,8 @@ def hook_RegSetValueExA(eip, esp, uc):
     cbData = pops(uc, esp + 0x18)
     ValueName = uc.mem_read(lpValueName, 0x100)
     Data = uc.mem_read(lpData, 0x100)
-    print("0x%x:\tCall RegSetValueExA (ValueName: %s, Registry data: %s)\n" % (
-        eip_saved, string_pack(ValueName), string_pack(Data)))
+    print("0x%x:\tCall RegSetValueExA (hKey = 0x%x, ValueName: %s, Registry data: %s)\n" % (
+        eip_saved, hKey, string_pack(ValueName), string_pack(Data)))
     uc.reg_write(UC_X86_REG_ESP, esp + 0x18)
     uc.mem_write(esp + 0x18, pck32(eip_saved))
 
@@ -539,8 +542,8 @@ def simulator_initialisation(mu):
 
 
 def main(argv):
-    check = 0
-    inputfile = 'samples/keylogger.exe'
+    check = 1
+    inputfile = ''
     try:
         opts, args = getopt.getopt(argv, "s:p:", ["option=", "input="])
     except getopt.GetoptError:
